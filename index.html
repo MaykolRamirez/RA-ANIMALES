@@ -78,7 +78,7 @@
     const statusText = document.getElementById("status");
     let modelo;
 
-    const labels = ["pelicano", "conejo", "venado"];
+    const labels = ["pelicano","conejo", "venado"];
     let etiquetaAnterior = "";
 
     const audios = {
@@ -151,14 +151,23 @@
 
           const prediction = modelo.predict(image);
           prediction.array().then((scores) => {
-            const index = scores[0].indexOf(Math.max(...scores[0]));
-            const etiqueta = labels[index];
+            const scoreArray = scores[0];
+            const maxScore = Math.max(...scoreArray);
+            const index = scoreArray.indexOf(maxScore);
 
-            if (etiqueta !== etiquetaAnterior) {
-              etiquetaAnterior = etiqueta;
-              statusText.textContent = `Detectado: ${etiqueta}`;
-              mostrarModelo(etiqueta);
-              reproducirAudio(etiqueta);
+            if (maxScore > 0.85) {  // Usa 0.85 como umbral de confianza
+              const etiqueta = labels[index];
+              if (etiqueta !== etiquetaAnterior) {
+                etiquetaAnterior = etiqueta;
+                statusText.textContent = `Detectado: ${etiqueta} (confianza: ${(maxScore * 100).toFixed(1)}%)`;
+                mostrarModelo(etiqueta);
+                reproducirAudio(etiqueta);
+              }
+            } else {
+              statusText.textContent = `Confianza baja: ${(maxScore * 100).toFixed(1)}% - No se muestra modelo`;
+              for (const key in modelos) {
+                modelos[key].setAttribute("visible", false); // Oculta todos los modelos
+              }
             }
           });
 
