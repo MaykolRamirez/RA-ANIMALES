@@ -1,439 +1,176 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-    <head>
-        <title>Realidad Aumentada - Animales del Museo</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-        <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
-        <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
-        <script src="https://raw.githack.com/donmccurdy/aframe-extras/master/dist/aframe-extras.loaders.min.js"></script>
-        <script src="https://raw.githack.com/AR-js-org/studio-backend/master/src/modules/marker/tools/gesture-detector.js"></script>
-        <script src="https://raw.githack.com/AR-js-org/studio-backend/master/src/modules/marker/tools/gesture-handler.js"></script>
-        
-        <style>
-            body {
-                margin: 0;
-                overflow: hidden;
-                font-family: Arial, sans-serif;
-                touch-action: none;
-                -webkit-touch-callout: none;
-                -webkit-user-select: none;
-                -khtml-user-select: none;
-                -moz-user-select: none;
-                -ms-user-select: none;
-                user-select: none;
+
+<head>
+  <title>Reconocimiento de Animales con IA</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+
+    #videoElement {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+      z-index: 0;
+    }
+
+    #status {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      padding: 5px 10px;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      font-family: sans-serif;
+      z-index: 2;
+    }
+
+    a-scene {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+      pointer-events: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="status">Cargando modelo...</div>
+  <video autoplay playsinline id="videoElement"></video>
+
+  <a-scene embedded>
+    <a-assets>
+      <!-- Audios -->
+      <audio id="audioConejo" src="./audio/conejo-audio.mp3"></audio>
+      <audio id="audioPelicano" src="./audio/pelicano-audio.mp3"></audio>
+      <audio id="audioVenado" src="./audio/venado-audio.mp3"></audio>
+
+      <!-- Modelos 3D -->
+      <a-asset-item id="conejo" src="./assets/conejo.glb"></a-asset-item>
+      <a-asset-item id="pelicano" src="./assets/pelicano.glb"></a-asset-item>
+      <a-asset-item id="venado" src="./assets/venado.glb"></a-asset-item>
+    </a-assets>
+
+    <a-entity id="modeloConejo" gltf-model="#conejo" visible="false" position="0 0.5 -3"
+      scale="1.5 1.5 1.5"></a-entity>
+    <a-entity id="modeloPelicano" gltf-model="#pelicano" visible="false" position="0 0.5 -3"
+      scale="1.5 1.5 1.5"></a-entity>
+    <a-entity id="modeloVenado" gltf-model="#venado" visible="false" position="0 0.5 -3"
+      scale="1.5 1.5 1.5"></a-entity>
+
+    <a-camera position="0 1.6 0"></a-camera>
+  </a-scene>
+
+  <script>
+    const video = document.getElementById("videoElement");
+    const statusText = document.getElementById("status");
+    let modelo;
+
+    const labels = ["conejo", "pelicano", "venado"];
+    let etiquetaAnterior = "";
+
+    const audios = {
+      conejo: document.getElementById("audioConejo"),
+      pelicano: document.getElementById("audioPelicano"),
+      venado: document.getElementById("audioVenado"),
+    };
+
+    const modelos = {
+      conejo: document.querySelector("#modeloConejo"),
+      pelicano: document.querySelector("#modeloPelicano"),
+      venado: document.querySelector("#modeloVenado"),
+    };
+
+    // Activar cámara
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: "environment" } })
+      .then((stream) => {
+        video.srcObject = stream;
+      })
+      .catch((err) => {
+        statusText.textContent = "Error al acceder a la cámara.";
+        console.error(err);
+      });
+
+    // Cargar modelo
+    async function cargarModelo() {
+      try {
+        modelo = await tf.loadLayersModel("./model/model.json");
+        statusText.textContent = "Modelo cargado. Detectando...";
+        detectar();
+      } catch (error) {
+        statusText.textContent = "Error al cargar el modelo.";
+        console.error(error);
+      }
+    }
+
+    // Mostrar modelo correspondiente
+    function mostrarModelo(nombre) {
+      for (const key in modelos) {
+        modelos[key].setAttribute("visible", key === nombre);
+      }
+    }
+
+    // Reproducir audio correspondiente
+    function reproducirAudio(nombre) {
+      for (const key in audios) {
+        audios[key].pause();
+        audios[key].currentTime = 0;
+      }
+      audios[nombre].play();
+    }
+
+    // Detección continua
+    async function detectar() {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = 224;
+      canvas.height = 224;
+
+      setInterval(() => {
+        try {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          let image = tf.browser
+            .fromPixels(canvas)
+            .resizeBilinear([224, 224])
+            .toFloat()
+            .div(tf.scalar(255))
+            .expandDims();
+
+          const prediction = modelo.predict(image);
+          prediction.array().then((scores) => {
+            const index = scores[0].indexOf(Math.max(...scores[0]));
+            const etiqueta = labels[index];
+
+            if (etiqueta !== etiquetaAnterior) {
+              etiquetaAnterior = etiqueta;
+              statusText.textContent = `Detectado: ${etiqueta}`;
+              mostrarModelo(etiqueta);
+              reproducirAudio(etiqueta);
             }
-            
-            #loading-screen {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-                align-items: center;
-                z-index: 9999;
-                color: white;
-                text-align: center;
-            }
-            
-            #loading-screen.hidden {
-                display: none;
-            }
-            
-            .loader {
-                border: 4px solid rgba(255, 255, 255, 0.3);
-                border-top: 4px solid white;
-                border-radius: 50%;
-                width: 50px;
-                height: 50px;
-                animation: spin 1s linear infinite;
-                margin-bottom: 20px;
-            }
-            
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-            
-            #ui-overlay {
-                position: fixed;
-                top: 20px;
-                left: 20px;
-                right: 20px;
-                z-index: 1000;
-                display: flex;
-                justify-content: space-between;
-                align-items: flex-start;
-                pointer-events: none;
-            }
-            
-            #status-panel {
-                background: rgba(0, 0, 0, 0.8);
-                color: white;
-                padding: 15px;
-                border-radius: 10px;
-                font-size: 14px;
-                max-width: 300px;
-                backdrop-filter: blur(10px);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-            }
-            
-            #animal-info {
-                background: rgba(255, 255, 255, 0.95);
-                color: #333;
-                padding: 15px;
-                border-radius: 10px;
-                font-size: 14px;
-                max-width: 250px;
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-                display: none;
-            }
-            
-            #animal-info.show {
-                display: block;
-            }
-            
-            .animal-name {
-                font-size: 18px;
-                font-weight: bold;
-                margin-bottom: 8px;
-                color: #2c3e50;
-            }
-            
-            .animal-description {
-                line-height: 1.4;
-                color: #555;
-            }
-            
-            #instructions {
-                position: fixed;
-                bottom: 20px;
-                left: 50%;
-                transform: translateX(-50%);
-                background: rgba(0, 0, 0, 0.8);
-                color: white;
-                padding: 10px 20px;
-                border-radius: 20px;
-                font-size: 12px;
-                z-index: 1000;
-                backdrop-filter: blur(10px);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-            }
-            
-            .pulse {
-                animation: pulse 2s infinite;
-            }
-            
-            @keyframes pulse {
-                0% { opacity: 1; }
-                50% { opacity: 0.7; }
-                100% { opacity: 1; }
-            }
-        </style>
-    </head>
+          });
 
-    <body>
-        <!-- Pantalla de carga -->
-        <div id="loading-screen">
-            <div class="loader"></div>
-            <h2>Cargando Experiencia AR</h2>
-            <p>Preparando modelos 3D de animales...</p>
-        </div>
+          tf.dispose(image);
+        } catch (err) {
+          console.error("Error durante la detección:", err);
+        }
+      }, 1000);
+    }
 
-        <!-- Interfaz de usuario -->
-        <div id="ui-overlay">
-            <div id="status-panel">
-                <div><strong>🎯 Estado:</strong> <span id="detection-status">Buscando marcadores...</span></div>
-                <div><strong>📱 Instrucciones:</strong></div>
-                <div style="font-size: 12px; margin-top: 5px;">
-                    Enfoca la cámara hacia una imagen de:<br>
-                    • Conejo 🐰<br>
-                    • Pelícano 🦅<br>
-                    • Venado 🦌
-                </div>
-            </div>
-            
-            <div id="animal-info">
-                <div class="animal-name" id="animal-name">Animal</div>
-                <div class="animal-description" id="animal-description">Descripción del animal</div>
-            </div>
-        </div>
+    cargarModelo();
+  </script>
+</body>
 
-        <div id="instructions" class="pulse">
-            Mueve la cámara para encontrar los marcadores de animales
-        </div>
-
-        <!-- Escena AR -->
-        <a-scene
-            vr-mode-ui="enabled: false;"
-            loading-screen="enabled: false;"
-            renderer="logarithmicDepthBuffer: true;"
-            arjs="trackingMethod: best; sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3; cameraParametersUrl: https://raw.githubusercontent.com/AR-js-org/AR.js/master/data/data/camera_para.dat; maxDetectionRate: 30; canvasWidth: 640; canvasHeight: 480;"
-            id="scene"
-            embedded
-            gesture-detector
-        >
-            <!-- Assets -->
-            <a-assets>
-                <!-- Modelos 3D de animales -->
-                <a-asset-item id="rabbit-model" src="assets/conejo.glb"></a-asset-item>
-                <a-asset-item id="pelican-model" src="assets/pelicano.glb"></a-asset-item>
-                <a-asset-item id="deer-model" src="assets/venado.glb"></a-asset-item>
-                
-                <!-- Texturas y materiales adicionales -->
-                <a-mixin id="animal-animation" animation-mixer="loop: repeat"></a-mixin>
-                <a-mixin id="hover-animation" 
-                         animation__mouseenter="property: scale; to: 1.1 1.1 1.1; startEvents: mouseenter; dur: 200"
-                         animation__mouseleave="property: scale; to: 1 1 1; startEvents: mouseleave; dur: 200"></a-mixin>
-            </a-assets>
-
-            <!-- Marcador del Conejo -->
-            <a-marker
-                id="rabbit-marker"
-                type="pattern"
-                preset="custom"
-                url="assets/conejo.patt"
-                raycaster="objects: .clickable"
-                emitevents="true"
-                cursor="fuse: false; rayOrigin: mouse;"
-                markerhandler
-            >
-                <a-entity
-                    id="rabbit-entity"
-                    scale="0.5 0.5 0.5"
-                    position="0 0 0"
-                    rotation="0 0 0"
-                    gltf-model="#rabbit-model"
-                    mixin="animal-animation hover-animation"
-                    class="clickable"
-                    gesture-handler
-                    animation="property: rotation; to: 0 360 0; loop: true; dur: 20000"
-                >
-                    <!-- Plataforma base -->
-                    <a-cylinder 
-                        position="0 -0.5 0" 
-                        radius="0.8" 
-                        height="0.1" 
-                        color="#8B4513"
-                        opacity="0.8">
-                    </a-cylinder>
-                    
-                    <!-- Partículas decorativas -->
-                    <a-entity 
-                        id="rabbit-particles"
-                        position="0 1 0"
-                        particle-system="preset: dust; particleCount: 50; color: #90EE90">
-                    </a-entity>
-                </a-entity>
-            </a-marker>
-
-            <!-- Marcador del Pelícano -->
-            <a-marker
-                id="pelican-marker"
-                type="pattern"
-                preset="custom"
-                url="assets/pelicano.patt"
-                raycaster="objects: .clickable"
-                emitevents="true"
-                cursor="fuse: false; rayOrigin: mouse;"
-                markerhandler
-            >
-                <a-entity
-                    id="pelican-entity"
-                    scale="0.6 0.6 0.6"
-                    position="0 0 0"
-                    rotation="0 0 0"
-                    gltf-model="#pelican-model"
-                    mixin="animal-animation hover-animation"
-                    class="clickable"
-                    gesture-handler
-                    animation="property: position; to: 0 0.2 0; dir: alternate; loop: true; dur: 3000"
-                >
-                    <!-- Plataforma base -->
-                    <a-cylinder 
-                        position="0 -0.5 0" 
-                        radius="0.8" 
-                        height="0.1" 
-                        color="#4169E1"
-                        opacity="0.8">
-                    </a-cylinder>
-                    
-                    <!-- Efectos de agua -->
-                    <a-entity 
-                        id="pelican-water"
-                        position="0 -0.3 0"
-                        particle-system="preset: dust; particleCount: 30; color: #87CEEB">
-                    </a-entity>
-                </a-entity>
-            </a-marker>
-
-            <!-- Marcador del Venado -->
-            <a-marker
-                id="deer-marker"
-                type="pattern"
-                preset="custom"
-                url="assets/venado.patt"
-                raycaster="objects: .clickable"
-                emitevents="true"
-                cursor="fuse: false; rayOrigin: mouse;"
-                markerhandler
-            >
-                <a-entity
-                    id="deer-entity"
-                    scale="0.7 0.7 0.7"
-                    position="0 0 0"
-                    rotation="0 0 0"
-                    gltf-model="#deer-model"
-                    mixin="animal-animation hover-animation"
-                    class="clickable"
-                    gesture-handler
-                    animation="property: rotation; to: 0 360 0; loop: true; dur: 25000"
-                >
-                    <!-- Plataforma base -->
-                    <a-cylinder 
-                        position="0 -0.5 0" 
-                        radius="0.8" 
-                        height="0.1" 
-                        color="#228B22"
-                        opacity="0.8">
-                    </a-cylinder>
-                    
-                    <!-- Efectos de bosque -->
-                    <a-entity 
-                        id="deer-forest"
-                        position="0 0.5 0"
-                        particle-system="preset: dust; particleCount: 40; color: #32CD32">
-                    </a-entity>
-                </a-entity>
-            </a-marker>
-
-            <!-- Cámara con configuración optimizada para móviles -->
-            <a-entity 
-                camera
-                look-controls="enabled: false"
-                wasd-controls="enabled: false"
-                cursor="rayOrigin: mouse"
-            ></a-entity>
-        </a-scene>
-
-        <script>
-            // Información de los animales
-            const animalInfo = {
-                rabbit: {
-                    name: "Conejo 🐰",
-                    description: "Los conejos son mamíferos herbívoros conocidos por sus largas orejas y su capacidad de salto. Son animales muy sociales y pueden vivir hasta 12 años."
-                },
-                pelican: {
-                    name: "Pelícano 🦅", 
-                    description: "Los pelícanos son aves acuáticas grandes con un pico distintivo y una bolsa gular. Son excelentes pescadores y pueden volar largas distancias."
-                },
-                deer: {
-                    name: "Venado 🦌",
-                    description: "Los venados son mamíferos herbívoros ágiles y elegantes. Los machos desarrollan astas que renuevan cada año y son símbolos de la naturaleza salvaje."
-                }
-            };
-
-            // Variables de estado
-            let currentAnimal = null;
-            let isLoading = true;
-
-            // Elementos del DOM
-            const loadingScreen = document.getElementById('loading-screen');
-            const statusElement = document.getElementById('detection-status');
-            const animalInfoPanel = document.getElementById('animal-info');
-            const animalNameElement = document.getElementById('animal-name');
-            const animalDescriptionElement = document.getElementById('animal-description');
-            const instructionsElement = document.getElementById('instructions');
-
-            // Registrar componente personalizado para manejo de marcadores
-            AFRAME.registerComponent('markerhandler', {
-                init: function () {
-                    const marker = this.el;
-                    const markerId = marker.id;
-                    
-                    // Evento cuando se detecta el marcador
-                    marker.addEventListener('markerFound', () => {
-                        console.log(`Marcador ${markerId} detectado`);
-                        const animalType = markerId.replace('-marker', '');
-                        showAnimalInfo(animalType);
-                        updateStatus(`¡${animalInfo[animalType].name} detectado!`);
-                        instructionsElement.style.display = 'none';
-                    });
-                    
-                    // Evento cuando se pierde el marcador
-                    marker.addEventListener('markerLost', () => {
-                        console.log(`Marcador ${markerId} perdido`);
-                        hideAnimalInfo();
-                        updateStatus('Buscando marcadores...');
-                        instructionsElement.style.display = 'block';
-                    });
-                }
-            });
-
-            // Función para mostrar información del animal
-            function showAnimalInfo(animalType) {
-                if (animalInfo[animalType]) {
-                    currentAnimal = animalType;
-                    animalNameElement.textContent = animalInfo[animalType].name;
-                    animalDescriptionElement.textContent = animalInfo[animalType].description;
-                    animalInfoPanel.classList.add('show');
-                }
-            }
-
-            // Función para ocultar información del animal
-            function hideAnimalInfo() {
-                currentAnimal = null;
-                animalInfoPanel.classList.remove('show');
-            }
-
-            // Función para actualizar el estado
-            function updateStatus(message) {
-                statusElement.textContent = message;
-            }
-
-            // Manejo de eventos de carga
-            document.addEventListener('DOMContentLoaded', () => {
-                // Simular tiempo de carga
-                setTimeout(() => {
-                    loadingScreen.classList.add('hidden');
-                    isLoading = false;
-                    updateStatus('¡Listo! Busca los marcadores de animales');
-                }, 3000);
-            });
-
-            // Manejo de errores
-            window.addEventListener('error', (event) => {
-                console.error('Error en la aplicación:', event.error);
-                updateStatus('Error al cargar. Recarga la página.');
-            });
-
-            // Manejo de gestos táctiles
-            document.addEventListener('click', (event) => {
-                if (event.target.classList.contains('clickable') && currentAnimal) {
-                    // Agregar efectos de sonido o animaciones adicionales
-                    console.log(`Interacción con ${currentAnimal}`);
-                    
-                    // Ejemplo: cambiar la animación temporalmente
-                    const entity = event.target;
-                    entity.setAttribute('animation', 'property: scale; to: 1.2 1.2 1.2; dur: 200; dir: alternate; loop: 1');
-                }
-            });
-
-            // Funciones de utilidad para debugging
-            function logMarkerStatus() {
-                const markers = document.querySelectorAll('a-marker');
-                markers.forEach(marker => {
-                    console.log(`Marcador ${marker.id}: ${marker.object3D.visible ? 'visible' : 'oculto'}`);
-                });
-            }
-
-            // Intervalo para verificar el estado (solo para debugging)
-            if (window.location.search.includes('debug=true')) {
-                setInterval(logMarkerStatus, 5000);
-            }
-        </script>
-    </body>
 </html>
